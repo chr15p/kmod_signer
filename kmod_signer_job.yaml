@@ -1,0 +1,43 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sign-kmods
+spec:
+  ttlSecondsAfterFinished: 100
+  template:
+    spec:
+      containers:
+      - name: kmod-signer
+        image: quay.io/chrisp262/kmod-signer:v0.4
+        command: ["/signimage"]
+        env:
+          - name: UNSIGNEDIMAGE
+            value: quay.io/chrisp262/minimal-driver:procfsv1
+          - name: SIGNEDIMAGE
+            value: quay.io/chrisp262/minimal-driver:signed
+          - name: FILESTOSIGN
+            value: /modules/simple-kmod.ko:/modules/simple-procfs-kmod.ko
+          - name: KEYSECRET
+            value: /signingkeypair/my_signing_key.priv
+          - name: CERTSECRET
+            value: /signingkeypair/my_signing_key_pub.der
+          - name: PULLSECRET
+            value: /docker_config/.dockerconfigjson
+        volumeMounts:
+          - name: pullsecret
+            mountPath: "/docker_config"
+            readOnly: true
+          - name: signingkeypair
+            mountPath: "/signingkeypair"
+            readOnly: true
+      volumes:
+        - name: signingkeypair
+          secret:
+            secretName: signingkeypair
+            optional: false
+        - name: pullsecret
+          secret:
+            secretName: chrisp262-minimal-pull-secret
+            optional: true
+      restartPolicy: Never
