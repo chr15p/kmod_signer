@@ -31,18 +31,6 @@ func getenv(key string, fallback string) string{
 	return value
 }
 
-/*
-func isin(name string, arr []string) bool {
-	canonical := canonicalisePath(name)
-	//fmt.Println(canonical)
-	for _, value := range arr {
-		if value == canonical {
-			return true
-		}
-	}
-	return false
-}
-*/
 func canonicalisePath(path string) string {
 	canonical := strings.Replace("/" + path, "/./","/", -1)
 	return strings.Replace(canonical, "//","/", -1)
@@ -95,7 +83,7 @@ func writeTempFile(dir string, nametemplate string, contents []byte) string{
 
 
 func signFile(filename string, publickey string, privatekey string){
-	fmt.Println("running /tmp/sign-file","sha256",privatekey, publickey, filename)
+	fmt.Println("     running /sign-file","sha256",privatekey, publickey, filepath.Base(filename))
 	out, err := exec.Command("/tmp/sign-file","sha256",privatekey, publickey, filename).Output()
 	//err := cmd.Run()
 	if err != nil {
@@ -139,25 +127,6 @@ func addToTarball(tw *tar.Writer, filename string, header *tar.Header)  error {
 
 }
 
-/*
-func getRepoAuth(secret string) remote.Option {
-	var pulloptions remote.Option
-	if secret != "" {
-		pullconfig := authn.AuthConfig{}
-		err := pullconfig.UnmarshalJSON([]byte(secret))
-		if err != nil {
-			fmt.Errorf("unable to parse secret: %v\n", err)
-			panic(err)
-		}
-		authconfig := authn.FromConfig(pullconfig)
-		pulloptions = remote.WithAuth(authconfig)
-	}else {
-		pulloptions = remote.WithAuth(authn.Anonymous)
-
-	}
-	return pulloptions
-}
-*/
 
 func copyDockerConfig(fromfile string) (int64,error){
 // stupid hack to work around go-containerregistry hardcoding the name of the docker file
@@ -193,11 +162,11 @@ func main() {
 	}
 	//ctx := context.TODO()
 
+	// sets up a tar archive we will use for a new layer
 	var b bytes.Buffer
 	tarwriter := tar.NewWriter(&b)
 
-
-	//setup the container image to investigate
+	// get the env vars we are using for setup, or set some sensible defaults
 	unsignedimagename := getenv("UNSIGNEDIMAGE", "quay.io/chrisp262/minimal-driver:procfsv1")
 	signedimagename := getenv("SIGNEDIMAGE", unsignedimagename+"signed")
 	fileslist := getenv("FILESTOSIGN", "/modules/simple-kmod.ko")
@@ -214,6 +183,7 @@ func main() {
 		fmt.Printf("failed to copy dockerconfig, will try to carry on regardless: %v\n", err)
 	}
 
+	//make a map of the files to sign so we can track what we want to sign
 	kmodstosign := make(map[string]string)
 	for _,x := range strings.Split(fileslist, ":"){
 		kmodstosign[x]="not found"
@@ -227,12 +197,7 @@ func main() {
 		panic(err)
 	}
 
-	//pulloptions := getRepoAuth(pullsecret)
-	//pushoptions := getRepoAuth(pushsecret)
-
-	//descriptor, err := remote.Get(ref, remote.WithContext(ctx))
 	descriptor, err := remote.Get(ref, remote.WithAuthFromKeychain(authn.DefaultKeychain))
-	//descriptor, err := remote.Get(ref, pulloptions)
 	if err != nil {
 		te := &transport.Error{}
 
@@ -249,12 +214,15 @@ func main() {
 		fmt.Errorf("could not Image(): %v", err)
 		panic(err)
 	}
+	fmt.Printf("\n== Successfully pulled image: %s\n" ,unsignedimagename)
+	fmt.Printf("\n== Looking for files: %s\n" , strings.Replace(fileslist, ":", " ",-1))
 
 	/*
 	** loop through all the layers in the image from the top down
 	*/
 	layers,_ := img.Layers()
 	for i := len(layers)-1; i >=0; i-- {
+		fmt.Printf("== Searching layer %d\n" ,i)
 		currentlayer := layers[i]
 		layerreader, err := currentlayer.Uncompressed()
 		if err != nil {
@@ -271,42 +239,56 @@ func main() {
 			if err == io.EOF || header == nil {
 				break // End of archive
 			}
-			//fmt.Println(header.Name)
+
+			// paths in a layer are relative, and supplied paths are absolute so canonicalise
 			canonfilename := canonicalisePath(header.Name)
 			if kmodstosign[canonfilename] == "not found" {
+				fmt.Printf("\n == Found kmod: %s\n" ,header.Name)
+				//its a file we wanted and haven't already seen
+				//extract to the local filesystem
 				kmodstosign[canonfilename] = extractFile(extractiondir, header, tarreader)
+				fmt.Printf("\n  == Signing: %s\n" ,header.Name)
 
+				//sign it
 				signFile(kmodstosign[canonfilename], pubkeyfile, privkeyfile)
+				fmt.Printf("\n  == Signed successfully: %s\n" ,header.Name)
 
 				// add back in to the new layer
 				err := addToTarball( tarwriter, kmodstosign[canonfilename], header)
 				if err != nil {
 					fmt.Errorf("failed to add %d to layer: %v", canonfilename,  err)
 				}
+				fmt.Printf("\n  == Added signed file to new layer: %s\n" ,header.Name)
 
 			}
 
 		}
 	}
+	/*
 	for k,v := range kmodstosign {
-		fmt.Printf("%s",k)
+		fmt.Printf("%s ",k)
 		if v == "not found" {
 			fmt.Printf("%s\n",v)
 		}else{
 			fmt.Printf("signed\n",v)
 		}
 	}
-
+	*/
+	//turn our tar archive into a layer
 	signedlayer, err := tarball.LayerFromReader(&b, tarball.WithMediaType(types.OCILayer))
 	if err != nil {
 		fmt.Errorf("failed to generate layer from tar: %v", err)
 	}
 
+	// add the layer to the unsigned image
 	signedimage, err := mutate.AppendLayers(img, signedlayer)
 	if err != nil {
 		fmt.Errorf("failed to append layer: %v", err)
 	}
 
+	fmt.Printf("\n== Appended new layer to image\n")
+
+	// write the image back to the name:tag set via the envvars
 	signedref, err := name.ParseReference(signedimagename, opts...)
 	if err != nil {
 		fmt.Errorf("failed to parse signed image ref %s: %v", signedimagename, err)
@@ -316,9 +298,11 @@ func main() {
 	err = remote.Write(signedref, signedimage, remote.WithAuthFromKeychain(authn.DefaultKeychain))
 	//err = remote.Write(signedref, signedimage, pushoptions)
 	if err != nil {
-		fmt.Printf("\nfailed to push signed image: %v\n", err)
+		fmt.Printf("failed to push signed image: %v\n", err)
 		panic(0)
 	}
-	fmt.Println("image pushed as %s\n",signedimagename)
+	// we're done successfully, so we need a nice friendly message to say that
+	fmt.Printf("\n== Pushed image back to repo: %s\n\n",signedimagename)
+	os.Exit(0)
 }
 
