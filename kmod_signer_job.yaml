@@ -9,7 +9,7 @@ spec:
     spec:
       containers:
       - name: kmod-signer
-        image: quay.io/chrisp262/kmod-signer:v0.4
+        image: quay.io/chrisp262/kmod-signer:latest
         command: ["/signimage"]
         env:
           - name: UNSIGNEDIMAGE
