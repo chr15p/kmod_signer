@@ -32,14 +32,14 @@ func getenv(key string, fallback string) string{
 	return value
 }
 
-func checkarg(arg string, envvar string, fallback string) {
-	if arg == "" {
+func checkarg(arg *string, envvar string, fallback string) {
+	if *arg == "" {
 		if envvar != "" {
 			v, exists := os.LookupEnv(envvar)
 			if exists {
-				arg =v
+				*arg = v
 			}else if !exists && fallback != "" {
-				arg = fallback
+				*arg = fallback
 			} else {
 				fmt.Printf("%s not found:\n", envvar)
 				flag.PrintDefaults()
@@ -47,7 +47,6 @@ func checkarg(arg string, envvar string, fallback string) {
 			}
 		}
 	}
-	fmt.Printf("arguement %s %s\n", envvar, arg)
 	return
 }
 
@@ -106,7 +105,7 @@ func writeTempFile(dir string, nametemplate string, contents []byte) string{
 
 func signFile(filename string, publickey string, privatekey string){
 	fmt.Println("     running /sign-file","sha256",privatekey, publickey, filepath.Base(filename))
-	out, err := exec.Command("/tmp/sign-file","sha256",privatekey, publickey, filename).Output()
+	out, err := exec.Command("/sign-file","sha256",privatekey, publickey, filename).Output()
 	//err := cmd.Run()
 	if err != nil {
 		fmt.Println("signing %s returned: %s\n error: %v\n",filename, out, err)
@@ -179,13 +178,6 @@ func copyDockerConfig(fromfile string) (int64,error){
 func main() {
 
 	// get the env vars we are using for setup, or set some sensible defaults
-	//unsignedimageedfault := getenv("UNSIGNEDIMAGE", "quay.io/chrisp262/minimal-driver:procfsv1")
-	//signedimagename := getenv("SIGNEDIMAGE", unsignedimagename+"signed")
-	//fileslist := getenv("FILESTOSIGN", "/modules/simple-kmod.ko")
-	//privkeyfile := getenv("KEYSECRET", "/signingkey.priv")
-	//pubkeyfile := getenv("CERTSECRET", "/signingkey.pub")
-	//pullsecret := getenv("PULLSECRET", "/docker_config")
-	////pushsecret := getenv("PUSHSECRET", pullsecret)
 
 	var unsignedimagename string
 	var signedimagename string
@@ -202,16 +194,13 @@ func main() {
 
 	flag.Parse()
 
-	checkarg(unsignedimagename, "UNSIGNEDIMAGE", "")
-	checkarg(signedimagename, "SIGNEDIMAGE", unsignedimagename+"signed")
-	checkarg(fileslist, "FILESTOSIGN", "")
-	checkarg(privkeyfile, "KEYSECRET", "")
-	checkarg(pubkeyfile, "CERTSECRET", "")
-	checkarg(pullsecret, "PULLSECRET", "")
+	checkarg(&unsignedimagename, "UNSIGNEDIMAGE", "")
+	checkarg(&signedimagename, "SIGNEDIMAGE", unsignedimagename+"signed")
+	checkarg(&fileslist, "FILESTOSIGN", "")
+	checkarg(&privkeyfile, "KEYSECRET", "")
+	checkarg(&pubkeyfile, "CERTSECRET", "")
+	checkarg(&pullsecret, "PULLSECRET", "")
 	// if we've made it this far the arguements are sane
-
-	fmt.Println(unsignedimagename,signedimagename,fileslist,privkeyfile,pubkeyfile,pullsecret)
-	os.Exit(0)
 
 	// get a temp dir to copy kmods into for signing
 	extractiondir, err := os.MkdirTemp("/tmp/", "kmod_signer")
