@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"bytes"
+	"flag"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
@@ -30,6 +31,27 @@ func getenv(key string, fallback string) string{
 	fmt.Printf("%s=%s\n", key, value)
 	return value
 }
+
+func checkarg(arg string, envvar string, fallback string) {
+	if arg == "" {
+		if envvar != "" {
+			v, exists := os.LookupEnv(envvar)
+			if exists {
+				arg =v
+			}else if !exists && fallback != "" {
+				arg = fallback
+			} else {
+				fmt.Printf("%s not found:\n", envvar)
+				flag.PrintDefaults()
+				os.Exit(0)
+			}
+		}
+	}
+	fmt.Printf("arguement %s %s\n", envvar, arg)
+	return
+}
+
+
 
 func canonicalisePath(path string) string {
 	canonical := strings.Replace("/" + path, "/./","/", -1)
@@ -153,27 +175,55 @@ func copyDockerConfig(fromfile string) (int64,error){
 }
 
 
+
 func main() {
 
+	// get the env vars we are using for setup, or set some sensible defaults
+	//unsignedimageedfault := getenv("UNSIGNEDIMAGE", "quay.io/chrisp262/minimal-driver:procfsv1")
+	//signedimagename := getenv("SIGNEDIMAGE", unsignedimagename+"signed")
+	//fileslist := getenv("FILESTOSIGN", "/modules/simple-kmod.ko")
+	//privkeyfile := getenv("KEYSECRET", "/signingkey.priv")
+	//pubkeyfile := getenv("CERTSECRET", "/signingkey.pub")
+	//pullsecret := getenv("PULLSECRET", "/docker_config")
+	////pushsecret := getenv("PUSHSECRET", pullsecret)
+
+	var unsignedimagename string
+	var signedimagename string
+	var fileslist string
+	var privkeyfile string
+	var pubkeyfile string
+	var pullsecret string
+	flag.StringVar(&unsignedimagename, "unsignedimage", "", "name of the image to sign")
+	flag.StringVar(&signedimagename, "signedimage", "", "name of the signed image to produce")
+	flag.StringVar(&fileslist, "filestosign", "", "colon seperated list of kmods to sign")
+	flag.StringVar(&privkeyfile, "key", "", "path to file containing private key for signing")
+	flag.StringVar(&pubkeyfile, "cert", "", "path to file containing public key for signing")
+	flag.StringVar(&pullsecret, "pullsecret", "", "path to file containing credentials for pulling/pushing images")
+
+	flag.Parse()
+
+	checkarg(unsignedimagename, "UNSIGNEDIMAGE", "")
+	checkarg(signedimagename, "SIGNEDIMAGE", unsignedimagename+"signed")
+	checkarg(fileslist, "FILESTOSIGN", "")
+	checkarg(privkeyfile, "KEYSECRET", "")
+	checkarg(pubkeyfile, "CERTSECRET", "")
+	checkarg(pullsecret, "PULLSECRET", "")
+	// if we've made it this far the arguements are sane
+
+	fmt.Println(unsignedimagename,signedimagename,fileslist,privkeyfile,pubkeyfile,pullsecret)
+	os.Exit(0)
+
+	// get a temp dir to copy kmods into for signing
 	extractiondir, err := os.MkdirTemp("/tmp/", "kmod_signer")
 	if err != nil {
 		fmt.Errorf("could not create temp dir: %v\n", err)
 		panic(err)
 	}
-	//ctx := context.TODO()
 
 	// sets up a tar archive we will use for a new layer
 	var b bytes.Buffer
 	tarwriter := tar.NewWriter(&b)
 
-	// get the env vars we are using for setup, or set some sensible defaults
-	unsignedimagename := getenv("UNSIGNEDIMAGE", "quay.io/chrisp262/minimal-driver:procfsv1")
-	signedimagename := getenv("SIGNEDIMAGE", unsignedimagename+"signed")
-	fileslist := getenv("FILESTOSIGN", "/modules/simple-kmod.ko")
-	privkeyfile := getenv("KEYSECRET", "/signingkey.priv")
-	pubkeyfile := getenv("CERTSECRET", "/signingkey.pub")
-	pullsecret := getenv("PULLSECRET", "/docker_config")
-	//pushsecret := getenv("PUSHSECRET", pullsecret)
 
 	// this is dumb but it seems to be stupidly complex to 
 	// set the authconfig to a file from inside the program
