@@ -13,6 +13,9 @@ import (
 	"path/filepath"
 	"bytes"
 	"flag"
+	"github.com/docker/cli/cli/config"
+	//"github.com/docker/cli/cli/config/configfile"
+	dockertypes "github.com/docker/cli/cli/config/types"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
@@ -149,30 +152,41 @@ func addToTarball(tw *tar.Writer, filename string, header *tar.Header)  error {
 }
 
 
-func copyDockerConfig(fromfile string) (int64,error){
-// stupid hack to work around go-containerregistry hardcoding the name of the docker file
-	if fromfile == "" {
-		return 0,nil
+func getAuthFromFile(configfile string, repo string) (authn.Authenticator, error) {
+	//var cf *configfile.ConfigFile
+	fmt.Printf("configfile=%s\nrepo=%s\n", configfile, repo)
+	f, err := os.Open(configfile)
+	if err != nil {
+		return nil,err
 	}
-	home := getenv("HOME","/root")
+	defer f.Close()
+	cf, err := config.LoadFromReader(f)
+	if err != nil {
+		return nil, err
+	}
 
-	os.Mkdir(home+"/.docker", 0700)
+	//cf, err := config.Load(configfile)
+	//if err != nil {
+	//	return nil, err
+	//}
+	fmt.Println("cf=",cf)
 
-	source, err := os.Open(fromfile)
-        if err != nil {
-                return 0, err
-        }
-        defer source.Close()
+	var cfg dockertypes.AuthConfig
+	fmt.Println(cf)
+	cfg, err = cf.GetAuthConfig(repo)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println("cfg=",cfg)
+	return authn.FromConfig(authn.AuthConfig{
+		Username:      cfg.Username,
+		Password:      cfg.Password,
+		Auth:          cfg.Auth,
+		IdentityToken: cfg.IdentityToken,
+		RegistryToken: cfg.RegistryToken,
+	}), nil
 
-        destination, err := os.Create(home+"/.docker/config.json")
-        if err != nil {
-                return 0, err
-        }
-        defer destination.Close()
-        nBytes, err := io.Copy(destination, source)
-        return nBytes, err
 }
-
 
 
 func main() {
@@ -185,12 +199,14 @@ func main() {
 	var privkeyfile string
 	var pubkeyfile string
 	var pullsecret string
+	var pushsecret string
 	flag.StringVar(&unsignedimagename, "unsignedimage", "", "name of the image to sign")
 	flag.StringVar(&signedimagename, "signedimage", "", "name of the signed image to produce")
 	flag.StringVar(&fileslist, "filestosign", "", "colon seperated list of kmods to sign")
 	flag.StringVar(&privkeyfile, "key", "", "path to file containing private key for signing")
 	flag.StringVar(&pubkeyfile, "cert", "", "path to file containing public key for signing")
-	flag.StringVar(&pullsecret, "pullsecret", "", "path to file containing credentials for pulling/pushing images")
+	flag.StringVar(&pullsecret, "pullsecret", "", "path to file containing credentials for pulling images")
+	flag.StringVar(&pullsecret, "pushsecret", "", "path to file containing credentials for pushing images")
 
 	flag.Parse()
 
@@ -200,6 +216,7 @@ func main() {
 	checkarg(&privkeyfile, "KEYSECRET", "")
 	checkarg(&pubkeyfile, "CERTSECRET", "")
 	checkarg(&pullsecret, "PULLSECRET", "")
+	checkarg(&pushsecret, "PUSHSECRET", pullsecret)
 	// if we've made it this far the arguements are sane
 
 	// get a temp dir to copy kmods into for signing
@@ -217,10 +234,6 @@ func main() {
 	// this is dumb but it seems to be stupidly complex to 
 	// set the authconfig to a file from inside the program
 	// and the path its looking for is hardcoded *sigh*
-	_,err = copyDockerConfig(pullsecret)
-	if err != nil{
-		fmt.Printf("failed to copy dockerconfig, will try to carry on regardless: %v\n", err)
-	}
 
 	//make a map of the files to sign so we can track what we want to sign
 	kmodstosign := make(map[string]string)
@@ -236,7 +249,13 @@ func main() {
 		panic(err)
 	}
 
-	descriptor, err := remote.Get(ref, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+	a,err := getAuthFromFile(pullsecret, strings.Split(unsignedimagename, "/")[0])
+	if err != nil{
+		fmt.Printf("failed to get auth: %v\n", err)
+		panic(err)
+	}
+
+	descriptor, err := remote.Get(ref, remote.WithAuth(a))
 	if err != nil {
 		te := &transport.Error{}
 
@@ -334,8 +353,12 @@ func main() {
 		panic("push image")
 	}
 
-	err = remote.Write(signedref, signedimage, remote.WithAuthFromKeychain(authn.DefaultKeychain))
-	//err = remote.Write(signedref, signedimage, pushoptions)
+	a, err = getAuthFromFile(pushsecret, strings.Split(signedimagename, "/")[0])
+	if err != nil{
+		fmt.Printf("failed to get push auth: %v\n", err)
+		panic(err)
+	}
+	err = remote.Write(signedref, signedimage, remote.WithAuth(a))
 	if err != nil {
 		fmt.Printf("failed to push signed image: %v\n", err)
 		panic(0)
