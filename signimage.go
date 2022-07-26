@@ -154,7 +154,6 @@ func addToTarball(tw *tar.Writer, filename string, header *tar.Header)  error {
 
 func getAuthFromFile(configfile string, repo string) (authn.Authenticator, error) {
 	//var cf *configfile.ConfigFile
-	fmt.Printf("configfile=%s\nrepo=%s\n", configfile, repo)
 	f, err := os.Open(configfile)
 	if err != nil {
 		return nil,err
@@ -165,19 +164,13 @@ func getAuthFromFile(configfile string, repo string) (authn.Authenticator, error
 		return nil, err
 	}
 
-	//cf, err := config.Load(configfile)
-	//if err != nil {
-	//	return nil, err
-	//}
-	fmt.Println("cf=",cf)
-
 	var cfg dockertypes.AuthConfig
 	fmt.Println(cf)
 	cfg, err = cf.GetAuthConfig(repo)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("cfg=",cfg)
+
 	return authn.FromConfig(authn.AuthConfig{
 		Username:      cfg.Username,
 		Password:      cfg.Password,
