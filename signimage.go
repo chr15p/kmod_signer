@@ -111,7 +111,7 @@ func signFile(filename string, publickey string, privatekey string){
 	out, err := exec.Command("/sign-file","sha256",privatekey, publickey, filename).Output()
 	//err := cmd.Run()
 	if err != nil {
-		fmt.Println("signing %s returned: %s\n error: %v\n",filename, out, err)
+		fmt.Printf("signing %s returned: %s\n error: %v\n",filename, out, err)
 		fmt.Errorf("unable to sign kmod: %v\n", err)
 		panic(0)
 	}
@@ -170,7 +170,7 @@ func getAuthFromFile(configfile string, repo string) (authn.Authenticator, error
 	}
 
 	var cfg dockertypes.AuthConfig
-	fmt.Println(cf)
+
 	cfg, err = cf.GetAuthConfig(repo)
 	if err != nil {
 		return nil, err
@@ -188,7 +188,6 @@ func getAuthFromFile(configfile string, repo string) (authn.Authenticator, error
 
 
 func main() {
-
 	// get the env vars we are using for setup, or set some sensible defaults
 
 	var unsignedimagename string
@@ -298,7 +297,9 @@ func main() {
 
 			// paths in a layer are relative, and supplied paths are absolute so canonicalise
 			canonfilename := canonicalisePath(header.Name)
-			if kmodstosign[canonfilename] == "not found" {
+			//either the kmod has not yet been found, or we didn't define a list to search for
+			if kmodstosign[canonfilename] == "not found" || (fileslist=="" && kmodstosign[canonfilename] == "" ) {
+
 				fmt.Printf("\n == Found kmod: %s\n" ,header.Name)
 				//its a file we wanted and haven't already seen
 				//extract to the local filesystem
@@ -320,16 +321,11 @@ func main() {
 
 		}
 	}
-	/*
 	for k,v := range kmodstosign {
-		fmt.Printf("%s ",k)
 		if v == "not found" {
-			fmt.Printf("%s\n",v)
-		}else{
-			fmt.Printf("signed\n",v)
+			fmt.Printf("Failed to find %s \n",k)
 		}
 	}
-	*/
 	//turn our tar archive into a layer
 	signedlayer, err := tarball.LayerFromReader(&b, tarball.WithMediaType(types.OCILayer))
 	if err != nil {
