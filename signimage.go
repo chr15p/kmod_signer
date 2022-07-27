@@ -153,7 +153,12 @@ func addToTarball(tw *tar.Writer, filename string, header *tar.Header)  error {
 
 
 func getAuthFromFile(configfile string, repo string) (authn.Authenticator, error) {
-	//var cf *configfile.ConfigFile
+
+	if configfile == "" {
+		fmt.Printf("\n== no pull secret defined, default to Anonymous\n")
+		return authn.Anonymous, nil
+	}
+
 	f, err := os.Open(configfile)
 	if err != nil {
 		return nil,err
