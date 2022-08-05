@@ -332,11 +332,15 @@ func main() {
 		fmt.Errorf("failed to generate layer from tar: %v", err)
 	}
 
+
 	// add the layer to the unsigned image
 	signedimage, err := mutate.AppendLayers(img, signedlayer)
 	if err != nil {
 		fmt.Errorf("failed to append layer: %v", err)
 	}
+
+	signedimagemt := mutate.MediaType(signedimage, types.DockerUncompressedLayer)
+
 
 	fmt.Printf("\n== Appended new layer to image\n")
 
@@ -352,7 +356,7 @@ func main() {
 		fmt.Printf("failed to get push auth: %v\n", err)
 		panic(err)
 	}
-	err = remote.Write(signedref, signedimage, remote.WithAuth(a))
+	err = remote.Write(signedref, signedimagemt, remote.WithAuth(a))
 	if err != nil {
 		fmt.Printf("failed to push signed image: %v\n", err)
 		panic(0)
