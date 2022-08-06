@@ -339,7 +339,7 @@ func main() {
 		fmt.Errorf("failed to append layer: %v", err)
 	}
 
-	signedimagemt := mutate.MediaType(signedimage, types.DockerUncompressedLayer)
+	signedimagemt := mutate.MediaType(signedimage, types.DockerLayer)
 
 
 	fmt.Printf("\n== Appended new layer to image\n")
