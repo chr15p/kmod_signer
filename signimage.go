@@ -22,7 +22,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/v1/types"
 )
 
 
@@ -327,7 +326,8 @@ func main() {
 		}
 	}
 	//turn our tar archive into a layer
-	signedlayer, err := tarball.LayerFromReader(&b, tarball.WithMediaType(types.OCILayer))
+//	signedlayer, err := tarball.LayerFromReader(&b, tarball.WithMediaType(types.OCILayer))
+	signedlayer, err := tarball.LayerFromReader(&b)
 	if err != nil {
 		fmt.Errorf("failed to generate layer from tar: %v", err)
 	}
