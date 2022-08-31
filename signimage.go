@@ -22,7 +22,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/v1/types"
 )
 
 
@@ -327,20 +326,17 @@ func main() {
 		}
 	}
 	//turn our tar archive into a layer
-	signedlayer, err := tarball.LayerFromReader(&b, tarball.WithMediaType(types.OCILayer))
+//	signedlayer, err := tarball.LayerFromReader(&b, tarball.WithMediaType(types.OCILayer))
+	signedlayer, err := tarball.LayerFromReader(&b)
 	if err != nil {
 		fmt.Errorf("failed to generate layer from tar: %v", err)
 	}
-
 
 	// add the layer to the unsigned image
 	signedimage, err := mutate.AppendLayers(img, signedlayer)
 	if err != nil {
 		fmt.Errorf("failed to append layer: %v", err)
 	}
-
-	signedimagemt := mutate.MediaType(signedimage, types.DockerLayer)
-
 
 	fmt.Printf("\n== Appended new layer to image\n")
 
@@ -356,7 +352,7 @@ func main() {
 		fmt.Printf("failed to get push auth: %v\n", err)
 		panic(err)
 	}
-	err = remote.Write(signedref, signedimagemt, remote.WithAuth(a))
+	err = remote.Write(signedref, signedimage, remote.WithAuth(a))
 	if err != nil {
 		fmt.Printf("failed to push signed image: %v\n", err)
 		panic(0)
