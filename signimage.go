@@ -196,6 +196,7 @@ func main() {
 	var pubkeyfile string
 	var pullsecret string
 	var pushsecret string
+	var nopush bool
 	flag.StringVar(&unsignedimagename, "unsignedimage", "", "name of the image to sign")
 	flag.StringVar(&signedimagename, "signedimage", "", "name of the signed image to produce")
 	flag.StringVar(&fileslist, "filestosign", "", "colon seperated list of kmods to sign")
@@ -203,6 +204,7 @@ func main() {
 	flag.StringVar(&pubkeyfile, "cert", "", "path to file containing public key for signing")
 	flag.StringVar(&pullsecret, "pullsecret", "", "path to file containing credentials for pulling images")
 	flag.StringVar(&pullsecret, "pushsecret", "", "path to file containing credentials for pushing images")
+	flag.BoolVar(&nopush, "no-push", false, "do not push the resulting image")
 
 	flag.Parse()
 
@@ -340,22 +342,24 @@ func main() {
 
 	fmt.Printf("\n== Appended new layer to image\n")
 
-	// write the image back to the name:tag set via the envvars
-	signedref, err := name.ParseReference(signedimagename, opts...)
-	if err != nil {
-		fmt.Errorf("failed to parse signed image ref %s: %v", signedimagename, err)
-		panic("push image")
-	}
+	if nopush == false {
+		// write the image back to the name:tag set via the envvars
+		signedref, err := name.ParseReference(signedimagename, opts...)
+		if err != nil {
+			fmt.Errorf("failed to parse signed image ref %s: %v", signedimagename, err)
+			panic("push image")
+		}
 
-	a, err = getAuthFromFile(pushsecret, strings.Split(signedimagename, "/")[0])
-	if err != nil{
-		fmt.Printf("failed to get push auth: %v\n", err)
-		panic(err)
-	}
-	err = remote.Write(signedref, signedimage, remote.WithAuth(a))
-	if err != nil {
-		fmt.Printf("failed to push signed image: %v\n", err)
-		panic(0)
+		a, err = getAuthFromFile(pushsecret, strings.Split(signedimagename, "/")[0])
+		if err != nil{
+			fmt.Printf("failed to get push auth: %v\n", err)
+			panic(err)
+		}
+		err = remote.Write(signedref, signedimage, remote.WithAuth(a))
+		if err != nil {
+			fmt.Printf("failed to push signed image: %v\n", err)
+			panic(0)
+		}
 	}
 	// we're done successfully, so we need a nice friendly message to say that
 	fmt.Printf("\n== Pushed image back to repo: %s\n\n",signedimagename)
