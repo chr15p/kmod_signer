@@ -328,8 +328,8 @@ func main() {
 		}
 	}
 	//turn our tar archive into a layer
-//	signedlayer, err := tarball.LayerFromReader(&b, tarball.WithMediaType(types.OCILayer))
-	signedlayer, err := tarball.LayerFromReader(&b)
+	mediatype, _ := layers[len(layers)-1].MediaType()
+	signedlayer, err := tarball.LayerFromReader(&b, tarball.WithMediaType(mediatype))
 	if err != nil {
 		fmt.Errorf("failed to generate layer from tar: %v", err)
 	}
