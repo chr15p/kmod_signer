@@ -322,11 +322,18 @@ func main() {
 
 		}
 	}
+	missingkmods := 0
 	for k,v := range kmodstosign {
 		if v == "not found" {
-			fmt.Printf("Failed to find %s \n",k)
+			missingkmods = 1
+			fmt.Printf("Failed to find expected kmod %s \n",k)
 		}
 	}
+	if missingkmods != 0 {
+		fmt.Printf("Failed to find all expected kmods\n")
+		os.Exit(1)
+	}
+
 	//turn our tar archive into a layer
 	mediatype, _ := layers[len(layers)-1].MediaType()
 	signedlayer, err := tarball.LayerFromReader(&b, tarball.WithMediaType(mediatype))
