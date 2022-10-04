@@ -1,5 +1,7 @@
-FROM registry.access.redhat.com/ubi8-minimal:latest  as ksource
-RUN microdnf -y install kernel-devel 
+FROM registry.fedoraproject.org/fedora as ksource
+RUN yum install -y kernel-devel
+#FROM registry.access.redhat.com/ubi8-minimal:latest  as ksource
+#RUN microdnf -y install kernel-devel 
 RUN cp /usr/src/kernels/*/scripts/sign-file /sign-file
 
 FROM golang:1.18 as builder
