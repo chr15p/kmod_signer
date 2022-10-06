@@ -20,8 +20,9 @@ fmt: ## Run go fmt against code.
 .PHONY: vet
 vet: ## Run go vet against code.
 	go vet ./...
-
-signimage: ## Build sign-image binary.
+	
+## Build signimage binary.
+signimage: signimage.go
 	go build -o $@
 
 .PHONY: run
