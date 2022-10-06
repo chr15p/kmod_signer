@@ -29,7 +29,6 @@ func getenv(key string, fallback string) string {
 	if !exists {
 		value = fallback
 	}
-	fmt.Printf("%s=%s\n", key, value)
 	return value
 }
 
@@ -63,8 +62,7 @@ func extractFile(tmpdir string, header *tar.Header, tarreader io.Reader) string 
 	for {
 		rc, err := tarreader.Read(contents[offset:])
 		if err != nil && err != io.EOF {
-			fmt.Errorf("could not read ko file: %v", err)
-			panic("file")
+			die(2, "could not read ko file", err)
 		}
 		offset += rc
 		if err == io.EOF {
@@ -74,13 +72,11 @@ func extractFile(tmpdir string, header *tar.Header, tarreader io.Reader) string 
 	dirname := filepath.Dir(header.Name)
 	err := os.MkdirAll(tmpdir+"/"+dirname, 0750)
 	if err != nil {
-		fmt.Errorf("could not create tempdir for kmod: %v", err)
-		panic(err)
+		die(2, "could not create tempdir for kmod", err)
 	}
 	err = os.WriteFile(tmpdir+"/"+header.Name, contents, 0700)
 	if err != nil {
-		fmt.Errorf("could not create temp kmod: %v", err)
-		panic(err)
+		die(2, "could not create temp kmod", err)
 	}
 	return tmpdir + "/" + header.Name
 }
@@ -88,9 +84,9 @@ func extractFile(tmpdir string, header *tar.Header, tarreader io.Reader) string 
 func writeTempFile(dir string, nametemplate string, contents []byte) string {
 	f, err := os.CreateTemp(dir, nametemplate)
 	if err != nil {
-		fmt.Errorf("could not create tempfile in %s: %v", dir, err)
+		die(3, "could not create tempfile", err)
 	}
-	//defer os.Remove(f.Name()) // clean up
+	defer os.Remove(f.Name()) // clean up
 	fmt.Printf("tmpfile=%s\n", f.Name())
 	f.Write(contents)
 	f.Close()
@@ -102,11 +98,9 @@ func writeTempFile(dir string, nametemplate string, contents []byte) string {
 func signFile(filename string, publickey string, privatekey string) {
 	fmt.Println("     running /sign-file", "sha256", privatekey, publickey, filepath.Base(filename))
 	out, err := exec.Command("/sign-file", "sha256", privatekey, publickey, filename).Output()
-	//err := cmd.Run()
 	if err != nil {
 		fmt.Printf("signing %s returned: %s\n error: %v\n", filename, out, err)
-		fmt.Errorf("unable to sign kmod: %v\n", err)
-		panic(0)
+		die(1, "unable to sign kmod", err)
 	}
 }
 
@@ -174,6 +168,14 @@ func getAuthFromFile(configfile string, repo string) (authn.Authenticator, error
 
 }
 
+func die(exitval int, message string, err error) {
+	fmt.Fprintf(os.Stderr, "%s: ", message)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+	}
+	os.Exit(exitval)
+}
+
 func main() {
 	// get the env vars we are using for setup, or set some sensible defaults
 
@@ -208,17 +210,13 @@ func main() {
 	// get a temp dir to copy kmods into for signing
 	extractiondir, err := os.MkdirTemp("/tmp/", "kmod_signer")
 	if err != nil {
-		fmt.Errorf("could not create temp dir: %v\n", err)
-		panic(err)
+		die(1, "could not create temp dir: %w", err)
 	}
+	defer os.Remove(extractiondir)
 
 	// sets up a tar archive we will use for a new layer
 	var b bytes.Buffer
 	tarwriter := tar.NewWriter(&b)
-
-	// this is dumb but it seems to be stupidly complex to
-	// set the authconfig to a file from inside the program
-	// and the path its looking for is hardcoded *sigh*
 
 	//make a map of the files to sign so we can track what we want to sign
 	kmodstosign := make(map[string]string)
@@ -226,18 +224,16 @@ func main() {
 		kmodstosign[x] = "not found"
 	}
 
-	// set up image download otions
+	// set up image download options
 	opts := make([]name.Option, 0)
 	ref, err := name.ParseReference(unsignedimagename, opts...)
 	if err != nil {
-		fmt.Errorf("could not parse the container image name: %v\n", err)
-		panic(err)
+		die(1, "could not parse the container image name", err)
 	}
 
 	a, err := getAuthFromFile(pullsecret, strings.Split(unsignedimagename, "/")[0])
 	if err != nil {
-		fmt.Printf("failed to get auth: %v\n", err)
-		panic(err)
+		die(1, "failed to get auth", err)
 	}
 
 	descriptor, err := remote.Get(ref, remote.WithAuth(a))
@@ -245,17 +241,15 @@ func main() {
 		te := &transport.Error{}
 
 		if errors.As(err, &te) && te.StatusCode == http.StatusNotFound {
-			fmt.Errorf("could not get image: http.StatusNotFound")
+			die(1, "could not get image http.StatusNotFound", err)
 		}
 
-		fmt.Errorf("could not get image: %v", err)
-		panic(err)
+		die(1, "could not get image", err)
 	}
 
 	img, err := descriptor.Image()
 	if err != nil {
-		fmt.Errorf("could not Image(): %v", err)
-		panic(err)
+		die(1, "could not Image()", err)
 	}
 	fmt.Printf("\n== Successfully pulled image: %s\n", unsignedimagename)
 	fmt.Printf("\n== Looking for files: %s\n", strings.Replace(fileslist, ":", " ", -1))
@@ -269,8 +263,7 @@ func main() {
 		currentlayer := layers[i]
 		layerreader, err := currentlayer.Uncompressed()
 		if err != nil {
-			fmt.Errorf("could not get layer: %v", err)
-			panic(err)
+			die(1, "could not get layer", err)
 		}
 
 		/*
@@ -278,7 +271,7 @@ func main() {
 		 */
 		tarreader := tar.NewReader(layerreader)
 		for {
-			header, _ := tarreader.Next()
+			header, err := tarreader.Next()
 			if err == io.EOF || header == nil {
 				break // End of archive
 			}
@@ -301,7 +294,7 @@ func main() {
 				// add back in to the new layer
 				err := addToTarball(tarwriter, kmodstosign[canonfilename], header)
 				if err != nil {
-					fmt.Errorf("failed to add %s to layer: %v", canonfilename, err)
+					fmt.Printf("failed to add %s to layer: %v", canonfilename, err)
 				}
 				fmt.Printf("\n  == Added signed file to new layer: %s\n", header.Name)
 
@@ -317,21 +310,20 @@ func main() {
 		}
 	}
 	if missingkmods != 0 {
-		fmt.Printf("Failed to find all expected kmods\n")
-		os.Exit(1)
+		die(1, "Failed to find all expected kmods\n", nil)
 	}
 
 	//turn our tar archive into a layer
 	mediatype, _ := layers[len(layers)-1].MediaType()
 	signedlayer, err := tarball.LayerFromReader(&b, tarball.WithMediaType(mediatype))
 	if err != nil {
-		fmt.Errorf("failed to generate layer from tar: %v", err)
+		die(1, "failed to generate layer from tar", err)
 	}
 
 	// add the layer to the unsigned image
 	signedimage, err := mutate.AppendLayers(img, signedlayer)
 	if err != nil {
-		fmt.Errorf("failed to append layer: %v", err)
+		die(1, "failed to append layer", err)
 	}
 
 	fmt.Printf("\n== Appended new layer to image\n")
@@ -340,19 +332,16 @@ func main() {
 		// write the image back to the name:tag set via the envvars
 		signedref, err := name.ParseReference(signedimagename, opts...)
 		if err != nil {
-			fmt.Errorf("failed to parse signed image ref %s: %v", signedimagename, err)
-			panic("push image")
+			die(1, "failed to parse signed image", err)
 		}
 
 		a, err = getAuthFromFile(pushsecret, strings.Split(signedimagename, "/")[0])
 		if err != nil {
-			fmt.Printf("failed to get push auth: %v\n", err)
-			panic(err)
+			die(1, "failed to get push auth", err)
 		}
 		err = remote.Write(signedref, signedimage, remote.WithAuth(a))
 		if err != nil {
-			fmt.Printf("failed to push signed image: %v\n", err)
-			panic(0)
+			die(1, "failed to push signed image", err)
 		}
 	}
 	// we're done successfully, so we need a nice friendly message to say that
