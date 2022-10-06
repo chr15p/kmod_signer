@@ -44,6 +44,5 @@ Or the from the command line
 	-pullsecret <pullsecretname> \
 	-key <keyfilename> \
 	-cert <certfilename> \
-	-filestosign /lib/modules/kmod1.ko:/lib/modules/kmod2.ko```
-
+	-filestosign </var/lib/kmod1.ko>[:</var/lib/kmod2.ko>]...
 

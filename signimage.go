@@ -224,9 +224,7 @@ func main() {
 		kmodstosign[x] = "not found"
 	}
 
-	// set up image download options
-	opts := make([]name.Option, 0)
-	ref, err := name.ParseReference(unsignedimagename, opts...)
+	ref, err := name.ParseReference(unsignedimagename, nil)
 	if err != nil {
 		die(1, "could not parse the container image name", err)
 	}
@@ -330,7 +328,7 @@ func main() {
 
 	if nopush == false {
 		// write the image back to the name:tag set via the envvars
-		signedref, err := name.ParseReference(signedimagename, opts...)
+		signedref, err := name.ParseReference(signedimagename, nil)
 		if err != nil {
 			die(1, "failed to parse signed image", err)
 		}
