@@ -255,7 +255,10 @@ func main() {
 	/*
 	** loop through all the layers in the image from the top down
 	 */
-	layers, _ := img.Layers()
+	layers, err := img.Layers()
+	if err != nil {
+		die(127, "could not get the layers from the fetched image", err)
+	}
 	for i := len(layers) - 1; i >= 0; i-- {
 		fmt.Printf("== Searching layer %d\n", i)
 		currentlayer := layers[i]
