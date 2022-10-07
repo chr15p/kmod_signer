@@ -4,24 +4,26 @@ import (
 	//"context"
 	"archive/tar"
 	"bytes"
-	"errors"
+	//"errors"
 	"flag"
 	"fmt"
 	"github.com/docker/cli/cli/config"
 	"io"
-	"net/http"
+	//"net/http"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"signimage/registry"
 	"strings"
 	//"github.com/docker/cli/cli/config/configfile"
 	dockertypes "github.com/docker/cli/cli/config/types"
 	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/google/go-containerregistry/pkg/v1/mutate"
-	"github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
-	"github.com/google/go-containerregistry/pkg/v1/tarball"
+	//"github.com/google/go-containerregistry/pkg/name"
+	//"github.com/google/go-containerregistry/pkg/v1/mutate"
+	//"github.com/google/go-containerregistry/pkg/v1/remote"
+	//"github.com/google/go-containerregistry/pkg/v1/remote/transport"
+	//"github.com/google/go-containerregistry/pkg/v1/tarball"
 )
 
 func getenv(key string, fallback string) string {
@@ -104,6 +106,7 @@ func signFile(filename string, publickey string, privatekey string) {
 	}
 }
 
+/*
 func addToTarball(tw *tar.Writer, filename string, header *tar.Header) error {
 	finfo, err := os.Stat(filename)
 	if err != nil {
@@ -133,7 +136,7 @@ func addToTarball(tw *tar.Writer, filename string, header *tar.Header) error {
 	return nil
 
 }
-
+*/
 func getAuthFromFile(configfile string, repo string) (authn.Authenticator, error) {
 
 	if configfile == "" {
@@ -176,14 +179,21 @@ func die(exitval int, message string, err error) {
 	os.Exit(exitval)
 }
 
+var kmodstosign map[string]string
+var extractiondir string
+var tarwriter *tar.Writer
+var fileslist string
+var privkeyfile string
+var pubkeyfile string
+
 func main() {
 	// get the env vars we are using for setup, or set some sensible defaults
 
 	var unsignedimagename string
 	var signedimagename string
-	var fileslist string
-	var privkeyfile string
-	var pubkeyfile string
+	//var fileslist string
+	//var privkeyfile string
+	//var pubkeyfile string
 	var pullsecret string
 	var pushsecret string
 	var nopush bool
@@ -216,17 +226,12 @@ func main() {
 
 	// sets up a tar archive we will use for a new layer
 	var b bytes.Buffer
-	tarwriter := tar.NewWriter(&b)
+	tarwriter = tar.NewWriter(&b)
 
 	//make a map of the files to sign so we can track what we want to sign
-	kmodstosign := make(map[string]string)
+	kmodstosign = make(map[string]string)
 	for _, x := range strings.Split(fileslist, ":") {
 		kmodstosign[x] = "not found"
-	}
-
-	ref, err := name.ParseReference(unsignedimagename, nil)
-	if err != nil {
-		die(1, "could not parse the container image name", err)
 	}
 
 	a, err := getAuthFromFile(pullsecret, strings.Split(unsignedimagename, "/")[0])
@@ -234,75 +239,86 @@ func main() {
 		die(1, "failed to get auth", err)
 	}
 
-	descriptor, err := remote.Get(ref, remote.WithAuth(a))
-	if err != nil {
-		te := &transport.Error{}
+	r := registry.NewRegistry()
 
-		if errors.As(err, &te) && te.StatusCode == http.StatusNotFound {
-			die(1, "could not get image http.StatusNotFound", err)
-		}
-
-		die(1, "could not get image", err)
-	}
-
-	img, err := descriptor.Image()
+	img, err := r.GetImageByName(unsignedimagename, a)
 	if err != nil {
 		die(1, "could not Image()", err)
 	}
+
 	fmt.Printf("\n== Successfully pulled image: %s\n", unsignedimagename)
 	fmt.Printf("\n== Looking for files: %s\n", strings.Replace(fileslist, ":", " ", -1))
+
+	r.ModifyFilesInImage(img, processFile)
+
+	err = filepath.Walk(extractiondir, addFileToTarball)
+	if err != nil {
+		die(17, "unable to pack new layer", err)
+
+	}
 
 	/*
 	** loop through all the layers in the image from the top down
 	 */
-	layers, err := img.Layers()
-	if err != nil {
-		die(127, "could not get the layers from the fetched image", err)
-	}
-	for i := len(layers) - 1; i >= 0; i-- {
-		fmt.Printf("== Searching layer %d\n", i)
-		currentlayer := layers[i]
-		layerreader, err := currentlayer.Uncompressed()
+	/*
+		layers, err := img.Layers()
 		if err != nil {
-			die(1, "could not get layer", err)
+			die(127, "could not get the layers from the fetched image", err)
 		}
+		for i := len(layers) - 1; i >= 0; i-- {
+			fmt.Printf("== Searching layer %d\n", i)
+			currentlayer := layers[i]
 
-		/*
-		** loop through all the files in the layer
-		 */
-		tarreader := tar.NewReader(layerreader)
-		for {
-			header, err := tarreader.Next()
-			if err == io.EOF || header == nil {
-				break // End of archive
+
+			layerreader, err := currentlayer.Uncompressed()
+			if err != nil {
+				die(1, "could not get layer", err)
 			}
 
-			// paths in a layer are relative, and supplied paths are absolute so canonicalise
-			canonfilename := canonicalisePath(header.Name)
-			//either the kmod has not yet been found, or we didn't define a list to search for
-			if kmodstosign[canonfilename] == "not found" || (fileslist == "" && kmodstosign[canonfilename] == "") {
 
-				fmt.Printf("\n == Found kmod: %s\n", header.Name)
-				//its a file we wanted and haven't already seen
-				//extract to the local filesystem
-				kmodstosign[canonfilename] = extractFile(extractiondir, header, tarreader)
-				fmt.Printf("\n  == Signing: %s\n", header.Name)
 
-				//sign it
-				signFile(kmodstosign[canonfilename], pubkeyfile, privkeyfile)
-				fmt.Printf("\n  == Signed successfully: %s\n", header.Name)
 
-				// add back in to the new layer
-				err := addToTarball(tarwriter, kmodstosign[canonfilename], header)
-				if err != nil {
-					fmt.Printf("failed to add %s to layer: %v", canonfilename, err)
+
+			//
+			// loop through all the files in the layer
+			//
+			tarreader := tar.NewReader(layerreader)
+			for {
+				header, err := tarreader.Next()
+				if err == io.EOF || header == nil {
+					break // End of archive
 				}
-				fmt.Printf("\n  == Added signed file to new layer: %s\n", header.Name)
+
+				// paths in a layer are relative, and supplied paths are absolute so canonicalise
+				canonfilename := canonicalisePath(header.Name)
+				//either the kmod has not yet been found, or we didn't define a list to search for
+				if kmodstosign[canonfilename] == "not found" ||
+					(fileslist == "" &&
+					kmodstosign[canonfilename] == "" &&
+					canonfilename[len(canonfilename)-3:] == ".ko")
+
+					fmt.Printf("\n == Found kmod: %s\n", header.Name)
+					//its a file we wanted and haven't already seen
+					//extract to the local filesystem
+					kmodstosign[canonfilename] = extractFile(extractiondir, header, tarreader)
+					fmt.Printf("\n  == Signing: %s\n", header.Name)
+
+					//sign it
+					signFile(kmodstosign[canonfilename], pubkeyfile, privkeyfile)
+					fmt.Printf("\n  == Signed successfully: %s\n", header.Name)
+
+					// add back in to the new layer
+					err := addToTarball(tarwriter, kmodstosign[canonfilename], header)
+					if err != nil {
+						fmt.Printf("failed to add %s to layer: %v", canonfilename, err)
+					}
+					fmt.Printf("\n  == Added signed file to new layer: %s\n", header.Name)
+
+				}
 
 			}
-
 		}
-	}
+	*/
 	missingkmods := 0
 	for k, v := range kmodstosign {
 		if v == "not found" {
@@ -315,37 +331,80 @@ func main() {
 	}
 
 	//turn our tar archive into a layer
-	mediatype, _ := layers[len(layers)-1].MediaType()
-	signedlayer, err := tarball.LayerFromReader(&b, tarball.WithMediaType(mediatype))
+	mediatype, err := r.GetMediaType(img)
 	if err != nil {
-		die(1, "failed to generate layer from tar", err)
+		fmt.Printf("unable to get mediatype for the layer. Guessing\n")
 	}
-
-	// add the layer to the unsigned image
-	signedimage, err := mutate.AppendLayers(img, signedlayer)
+	signedimage, err := r.AddLayerToImage(&b, img, mediatype)
 	if err != nil {
-		die(1, "failed to append layer", err)
+		die(12, "failed to add layer to image", err)
 	}
 
 	fmt.Printf("\n== Appended new layer to image\n")
 
 	if nopush == false {
-		// write the image back to the name:tag set via the envvars
-		signedref, err := name.ParseReference(signedimagename, nil)
-		if err != nil {
-			die(1, "failed to parse signed image", err)
-		}
-
 		a, err = getAuthFromFile(pushsecret, strings.Split(signedimagename, "/")[0])
 		if err != nil {
 			die(1, "failed to get push auth", err)
 		}
-		err = remote.Write(signedref, signedimage, remote.WithAuth(a))
+
+		// write the image back to the name:tag set via the args
+		r.WriteImageByName(signedimagename, signedimage, a)
 		if err != nil {
-			die(1, "failed to push signed image", err)
+			die(1, "failed to write signed image", err)
 		}
 	}
 	// we're done successfully, so we need a nice friendly message to say that
 	fmt.Printf("\n== Pushed image back to repo: %s\n\n", signedimagename)
 	os.Exit(0)
+}
+
+func processFile(filename string, header *tar.Header, tarreader io.Reader) error {
+
+	canonfilename := canonicalisePath(filename)
+	//either the kmod has not yet been found, or we didn't define a list to search for
+	if kmodstosign[canonfilename] == "not found" ||
+		(fileslist == "" &&
+			kmodstosign[canonfilename] == "" &&
+			canonfilename[len(canonfilename)-3:] == ".ko") {
+
+		fmt.Printf("\n == Found kmod: %s\n", header.Name)
+		//its a file we wanted and haven't already seen
+		//extract to the local filesystem
+		kmodstosign[canonfilename] = extractFile(extractiondir, header, tarreader)
+		fmt.Printf("\n  == Signing: %s\n", header.Name)
+
+		//sign it
+		signFile(kmodstosign[canonfilename], pubkeyfile, privkeyfile)
+		fmt.Printf("\n  == Signed successfully: %s\n", header.Name)
+		return nil
+
+	}
+	return nil
+}
+
+func addFileToTarball(filename string, finfo fs.FileInfo, err error) error {
+
+	hdr := &tar.Header{
+		Name:     finfo.Name(),
+		Mode:     int64(finfo.Mode()),
+		Typeflag: 0,
+		Size:     finfo.Size(),
+	}
+
+	if err := tarwriter.WriteHeader(hdr); err != nil {
+		return fmt.Errorf("failed to write tar header: %w", err)
+	}
+
+	f, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(tarwriter, f); err != nil {
+		return fmt.Errorf("failed to read file into the tar: %w", err)
+	}
+	f.Close()
+
+	return nil
+
 }

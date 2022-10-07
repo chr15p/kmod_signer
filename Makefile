@@ -3,6 +3,8 @@ IMAGE_TAG ?= $(shell  git log --format="%H" -n 1)
 # Image URL to use all building/pushing image targets
 IMG ?= $(IMAGE_TAG_BASE):$(IMAGE_TAG)
 
+PODMAN=podman
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(shell go env GOPATH)/bin
@@ -20,7 +22,7 @@ fmt: ## Run go fmt against code.
 .PHONY: vet
 vet: ## Run go vet against code.
 	go vet ./...
-	
+
 ## Build signimage binary.
 signimage: signimage.go
 	go build -o $@
@@ -31,4 +33,4 @@ run: manifests generate fmt vet ## Run a controller from your host.
 
 .PHONY: image 
 image: ## Build docker image with the manager.
-	docker build -t $(IMG) .
+	$(PODMAN) build -t $(IMG) .

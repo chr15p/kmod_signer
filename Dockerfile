@@ -9,7 +9,9 @@ WORKDIR /workspace
 COPY go.mod go.mod
 COPY go.sum go.sum
 RUN go mod download
-COPY signimage.go signimage.go
+#COPY signimage.go signimage.go
+COPY * .
+
 # Build
 RUN go build signimage.go
 
